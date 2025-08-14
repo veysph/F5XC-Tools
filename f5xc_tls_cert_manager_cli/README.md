@@ -11,7 +11,8 @@ A Python tool for managing TLS certificates on the F5 Distributed Cloud platform
 
 - Python 3.8 or higher
 - F5 Distributed Cloud account
-- F5 Distributed Client certificate for authentication, please see https://docs.cloud.f5.com/docs-v2/administration/how-tos/user-mgmt/Credentials#generate-api-certificate-for-my-credentials
+- F5 Distributed Client certificate for authentication, please see 
+https://docs.cloud.f5.com/docs-v2/administration/how-tos/user-mgmt/Credentials#generate-api-certificate-for-my-credentials
 
 ## Setup Instructions
 
