@@ -1,0 +1,6 @@
+{
+  "tenant_name": "your-tenant-name",
+  "namespace": "shared",
+  "client_cert_path": "your-cert.p12",
+  "client_cert_password": "your-password"
+}

@@ -1,0 +1,30 @@
+[Unit]
+Description=F5XC Certificate Manager
+After=network.target
+
+[Service]
+Type=exec
+User=f5xc
+Group=f5xc
+WorkingDirectory=/opt/f5xc-cert-manager
+Environment=FLASK_ENV=production
+Environment=FLASK_DEBUG=false
+EnvironmentFile=-/opt/f5xc-cert-manager/.env
+ExecStart=/opt/f5xc-cert-manager/venv/bin/gunicorn --config gunicorn.conf.py app:app
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=f5xc-cert-manager
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/f5xc-cert-manager
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
