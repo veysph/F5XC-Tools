@@ -94,8 +94,6 @@ sudo systemctl status f5xc-cert-manager
 
 ## Manual Startup
 
-For testing or development:
-
 ```bash
 # Using the production script
 ./run_production.sh
