@@ -15,20 +15,9 @@ This application now supports generating Let's Encrypt certificates using the `c
 
 ### Prerequisites
 
-1. Install required Python packages:
+Install required Python packages:
 ```bash
 pip install -r requirements.txt
-```
-
-2. Install certbot and certbot-dns-multi:
-```bash
-# Option 1: Via pip
-pip install certbot certbot-dns-multi
-
-# Option 2: Via snap (recommended)
-sudo snap install certbot-dns-multi
-sudo snap set certbot trust-plugin-with-root=ok
-sudo snap connect certbot:plugin certbot-dns-multi
 ```
 
 ### Verification
