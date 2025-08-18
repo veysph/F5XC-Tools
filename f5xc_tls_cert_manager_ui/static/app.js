@@ -412,7 +412,7 @@ class CertificateManager {
                     <button class="btn btn-warning btn-sm" onclick="certificateManager.replaceCertificateFromCard('${cert.directory_name}')" title="Replace on F5XC">
                         <i class="fas fa-sync"></i> Replace
                     </button>
-                    <button class="btn btn-danger btn-sm" onclick="certificateManager.deleteCertificateFromCard()" title="Delete from F5XC">
+                    <button class="btn btn-danger btn-sm" onclick="certificateManager.deleteCertificateFromCard('${cert.directory_name}')" title="Delete certificate">
                         <i class="fas fa-trash"></i> Delete
                     </button>
                 </div>
@@ -805,8 +805,119 @@ class CertificateManager {
         this.showCertificateActionDialog('replace', directoryName);
     }
 
-    async deleteCertificateFromCard() {
-        this.showCertificateActionDialog('delete');
+    async deleteCertificateFromCard(directoryName) {
+        if (!directoryName) {
+            this.showAlert('No certificate specified for deletion', 'error');
+            return;
+        }
+
+        // Find the certificate to check for F5XC deployments
+        const certificate = this.certificates.find(cert => cert.directory_name === directoryName);
+        if (!certificate) {
+            this.showAlert('Certificate not found', 'error');
+            return;
+        }
+
+        // Check if certificate has F5XC deployments
+        const hasF5XCDeployments = certificate.f5xc_deployments && certificate.f5xc_deployments.length > 0;
+
+        if (hasF5XCDeployments) {
+            // Certificate has F5XC deployments - use F5XC delete workflow
+            this.showCertificateActionDialog('delete', directoryName);
+        } else {
+            // Certificate has no F5XC deployments - delete locally
+            this.showLocalDeleteConfirmation(directoryName);
+        }
+    }
+
+    showLocalDeleteConfirmation(directoryName) {
+        // Show a custom confirmation dialog for local deletion
+        const confirmTitle = 'Delete Certificate Locally';
+        const confirmMessage = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Local Certificate Deletion</strong>
+            </div>
+            <p>This certificate has no F5XC deployments and will be deleted locally only.</p>
+            <p><strong>Certificate:</strong> ${directoryName}</p>
+            <p><strong>This will delete:</strong></p>
+            <ul>
+                <li>Certificate files from <code>/certs/${directoryName}/</code></li>
+                <li>Let's Encrypt files from <code>/letsencrypt/config/live/${directoryName}/</code></li>
+            </ul>
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                <strong>Warning:</strong> This action cannot be undone!
+            </div>
+        `;
+
+        // Update confirmation modal
+        document.getElementById('confirm-title').textContent = confirmTitle;
+        document.getElementById('confirm-message').innerHTML = confirmMessage;
+        
+        // Store directory name for the action
+        this.pendingDeleteDirectory = directoryName;
+        
+        // Update confirm button
+        const confirmButton = document.getElementById('confirm-action');
+        confirmButton.textContent = 'Delete Locally';
+        confirmButton.className = 'btn btn-danger';
+        confirmButton.onclick = () => this.executeLocalDelete();
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
+        modal.show();
+    }
+
+    async executeLocalDelete() {
+        if (!this.pendingDeleteDirectory) {
+            this.showAlert('No certificate selected for deletion', 'error');
+            return;
+        }
+
+        const directoryName = this.pendingDeleteDirectory;
+        this.pendingDeleteDirectory = null;
+
+        try {
+            // Show loading state
+            const confirmButton = document.getElementById('confirm-action');
+            const originalText = confirmButton.textContent;
+            confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+            confirmButton.disabled = true;
+
+            // Call local delete API
+            const response = await fetch('/api/certificates/delete-local', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    directory_name: directoryName
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                this.showAlert(`Certificate '${directoryName}' deleted successfully from local storage`, 'success');
+                
+                // Close modal and refresh certificates
+                bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
+                await this.loadCertificates();
+            } else {
+                this.showAlert(`Failed to delete certificate: ${result.error || 'Unknown error'}`, 'danger');
+            }
+        } catch (error) {
+            console.error('Error deleting certificate locally:', error);
+            this.showAlert(`Error deleting certificate: ${error.message}`, 'danger');
+        } finally {
+            // Restore button state
+            const confirmButton = document.getElementById('confirm-action');
+            if (confirmButton) {
+                confirmButton.textContent = 'Delete Locally';
+                confirmButton.disabled = false;
+            }
+        }
     }
 
     async checkF5XCCertificate(directoryName) {
@@ -1215,6 +1326,644 @@ class CertificateManager {
     hideLoading() {
         document.getElementById('loading').style.display = 'none';
     }
+
+    // ========================================================================
+    // Let's Encrypt Certificate Generation
+    // ========================================================================
+
+    async showGenerateCertificate() {
+        const modal = new bootstrap.Modal(document.getElementById('generateCertModal'));
+        modal.show();
+        
+        // Reset form
+        document.getElementById('generate-cert-form').style.display = 'none';
+        document.getElementById('installation-check').style.display = 'block';
+        document.getElementById('validate-config-btn').style.display = 'none';
+        document.getElementById('generate-cert-btn').style.display = 'none';
+        
+        // Check installation
+        await this.checkCertbotInstallation();
+    }
+
+    async checkCertbotInstallation() {
+        try {
+            const response = await fetch('/api/letsencrypt/check-installation');
+            const status = await response.json();
+            
+            const statusDiv = document.getElementById('installation-status');
+            const spinner = document.getElementById('install-check-spinner');
+            
+            spinner.style.display = 'none';
+            statusDiv.style.display = 'block';
+            
+            if (status.certbot_installed && status.dns_multi_available) {
+                statusDiv.className = 'alert alert-success';
+                statusDiv.innerHTML = `
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Installation OK!</strong><br>
+                    <small>Certbot ${status.certbot_version || 'installed'} with dns-multi plugin available</small>
+                `;
+                
+                // Show form and load providers
+                document.getElementById('generate-cert-form').style.display = 'block';
+                await this.loadDNSProviders();
+                await this.loadSavedDNSConfigs();
+                
+            } else {
+                statusDiv.className = 'alert alert-warning';
+                let message = '<i class="fas fa-exclamation-triangle me-2"></i><strong>Installation Required</strong><br>';
+                
+                if (!status.certbot_installed) {
+                    message += '• Certbot is not installed<br>';
+                }
+                if (!status.dns_multi_available) {
+                    message += '• certbot-dns-multi plugin is not available<br>';
+                }
+                
+                message += `
+                    <div class="mt-3">
+                        <strong>Installation Instructions:</strong><br>
+                        <code>pip install certbot certbot-dns-multi</code><br>
+                        <small class="text-muted">Or install via snap: <code>snap install certbot-dns-multi</code></small>
+                    </div>
+                `;
+                
+                statusDiv.innerHTML = message;
+            }
+            
+        } catch (error) {
+            console.error('Error checking installation:', error);
+            const statusDiv = document.getElementById('installation-status');
+            const spinner = document.getElementById('install-check-spinner');
+            
+            spinner.style.display = 'none';
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'alert alert-danger';
+            statusDiv.innerHTML = `
+                <i class="fas fa-times-circle me-2"></i>
+                <strong>Error checking installation:</strong> ${error.message}
+            `;
+        }
+    }
+
+    async loadDNSProviders() {
+        try {
+            const response = await fetch('/api/letsencrypt/providers');
+            const data = await response.json();
+            
+            const select = document.getElementById('dns-provider');
+            select.innerHTML = '<option value="">Select a DNS provider...</option>';
+            
+            // Add popular providers first
+            const popularProviders = ['cloudflare', 'route53', 'digitalocean', 'godaddy', 'namecheap', 'ovh'];
+            const allProviders = data.providers || [];
+            
+            // Sort providers with popular ones first
+            const sortedProviders = [
+                ...popularProviders.filter(p => allProviders.includes(p)),
+                ...allProviders.filter(p => !popularProviders.includes(p)).sort()
+            ];
+            
+            sortedProviders.forEach(provider => {
+                const option = document.createElement('option');
+                option.value = provider;
+                option.textContent = provider.charAt(0).toUpperCase() + provider.slice(1);
+                select.appendChild(option);
+            });
+            
+        } catch (error) {
+            console.error('Error loading DNS providers:', error);
+            this.showAlert('Error loading DNS providers: ' + error.message, 'danger');
+        }
+    }
+
+    async loadProviderRequirements() {
+        const provider = document.getElementById('dns-provider').value;
+        const requirementsDiv = document.getElementById('provider-requirements');
+        const validateBtn = document.getElementById('validate-config-btn');
+        const generateBtn = document.getElementById('generate-cert-btn');
+        
+        if (!provider) {
+            requirementsDiv.style.display = 'none';
+            validateBtn.style.display = 'none';
+            generateBtn.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/letsencrypt/provider/${provider}/requirements`);
+            const requirements = await response.json();
+            
+            // Update provider description
+            document.getElementById('provider-description').innerHTML = `
+                <strong>${requirements.name || provider}</strong><br>
+                ${requirements.description || ''}
+            `;
+            
+            // Update documentation link
+            const docsLink = document.getElementById('provider-docs-link');
+            docsLink.href = requirements.docs_url || '#';
+            
+            // Build form fields
+            const fieldsDiv = document.getElementById('provider-fields');
+            fieldsDiv.innerHTML = '';
+            
+            const createFieldSection = (title, fields) => {
+                if (!fields || fields.length === 0) return '';
+                
+                let html = `<h6 class="mt-3 mb-2">${title}</h6>`;
+                fields.forEach(field => {
+                    const inputType = field.type === 'password' ? 'password' : 
+                                    field.type === 'email' ? 'email' : 'text';
+                    const required = field.required ? 'required' : '';
+                    const placeholder = field.description || field.name;
+                    
+                    html += `
+                        <div class="mb-3">
+                            <label for="dns-${field.name}" class="form-label">
+                                ${field.name} ${field.required ? '*' : ''}
+                            </label>
+                            <input type="${inputType}" class="form-control" 
+                                   id="dns-${field.name}" name="${field.name}" 
+                                   placeholder="${placeholder}" ${required}>
+                            <div class="form-text">${field.description || ''}</div>
+                        </div>
+                    `;
+                });
+                return html;
+            };
+            
+            let fieldsHtml = '';
+            fieldsHtml += createFieldSection('Required Fields', requirements.required_fields);
+            fieldsHtml += createFieldSection('Alternative Fields', requirements.alternative_fields);
+            fieldsHtml += createFieldSection('Optional Fields', requirements.optional_fields);
+            
+            fieldsDiv.innerHTML = fieldsHtml;
+            requirementsDiv.style.display = 'block';
+            validateBtn.style.display = 'inline-block';
+            
+        } catch (error) {
+            console.error('Error loading provider requirements:', error);
+            this.showAlert('Error loading provider requirements: ' + error.message, 'danger');
+        }
+    }
+
+    async validateDNSConfig() {
+        const provider = document.getElementById('dns-provider').value;
+        if (!provider) {
+            this.showAlert('Please select a DNS provider first', 'warning');
+            return;
+        }
+        
+        // Collect DNS configuration
+        const config = this.collectDNSConfig();
+        
+        try {
+            const response = await fetch('/api/letsencrypt/validate-config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    provider: provider,
+                    config: config
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.valid) {
+                this.showAlert('DNS configuration is valid!', 'success');
+                document.getElementById('generate-cert-btn').style.display = 'inline-block';
+            } else {
+                this.showAlert('Configuration validation failed: ' + result.error, 'danger');
+                document.getElementById('generate-cert-btn').style.display = 'none';
+            }
+            
+        } catch (error) {
+            console.error('Error validating DNS config:', error);
+            this.showAlert('Error validating configuration: ' + error.message, 'danger');
+        }
+    }
+
+    collectDNSConfig() {
+        const config = {};
+        const fieldsDiv = document.getElementById('provider-fields');
+        const inputs = fieldsDiv.querySelectorAll('input');
+        
+        inputs.forEach(input => {
+            if (input.value.trim()) {
+                config[input.name] = input.value.trim();
+            }
+        });
+        
+        return config;
+    }
+
+    async generateCertificate() {
+        // Validate form
+        const email = document.getElementById('cert-email').value.trim();
+        const domainsText = document.getElementById('cert-domains').value.trim();
+        const provider = document.getElementById('dns-provider').value;
+        
+        if (!email || !domainsText || !provider) {
+            this.showAlert('Please fill in all required fields', 'warning');
+            return;
+        }
+        
+        // Parse domains
+        const domains = domainsText.split('\n')
+            .map(d => d.trim())
+            .filter(d => d.length > 0);
+        
+        if (domains.length === 0) {
+            this.showAlert('Please enter at least one domain', 'warning');
+            return;
+        }
+        
+        // Collect DNS configuration
+        const dnsConfig = this.collectDNSConfig();
+        
+        // Get options
+        const staging = document.getElementById('cert-staging').checked;
+        const forceRenewal = document.getElementById('cert-force-renewal').checked;
+        
+        // Show loading state
+        const generateBtn = document.getElementById('generate-cert-btn');
+        const originalText = generateBtn.innerHTML;
+        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+        generateBtn.disabled = true;
+        
+        try {
+            // Start certificate generation
+            const response = await fetch('/api/letsencrypt/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    domains: domains,
+                    provider: provider,
+                    dns_config: dnsConfig,
+                    email: email,
+                    staging: staging,
+                    force_renewal: forceRenewal
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // Start polling for job status
+                this.showAlert('Certificate generation started...', 'info');
+                await this.pollJobStatus(result.job_id, generateBtn, originalText);
+            } else {
+                this.showAlert('Failed to start certificate generation: ' + result.error, 'danger');
+                console.error('Generation start failed:', result);
+                
+                // Restore button state
+                generateBtn.innerHTML = originalText;
+                generateBtn.disabled = false;
+            }
+            
+        } catch (error) {
+            console.error('Error starting certificate generation:', error);
+            this.showAlert('Error starting certificate generation: ' + error.message, 'danger');
+            
+            // Restore button state
+            generateBtn.innerHTML = originalText;
+            generateBtn.disabled = false;
+        }
+    }
+
+    async pollJobStatus(jobId, generateBtn, originalText) {
+        const pollInterval = 2000; // Poll every 2 seconds
+        const maxPollTime = 600000; // Maximum 10 minutes
+        const startTime = Date.now();
+        
+        const poll = async () => {
+            try {
+                const response = await fetch(`/api/letsencrypt/job/${jobId}`);
+                const jobInfo = await response.json();
+                
+                if (response.ok) {
+                    // Update button text with progress
+                    const progress = jobInfo.progress || 'Working...';
+                    generateBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${progress}`;
+                    
+                    if (jobInfo.status === 'completed') {
+                        // Success
+                        const result = jobInfo.result;
+                        if (result && result.success) {
+                            this.showAlert(`Certificate generated successfully! Certificate: ${result.certificate_name}`, 'success');
+                            
+                            // Close modal and refresh certificates
+                            bootstrap.Modal.getInstance(document.getElementById('generateCertModal')).hide();
+                            await this.loadCertificates();
+                        } else {
+                            this.showAlert('Certificate generation completed but failed: ' + (result?.error || 'Unknown error'), 'danger');
+                        }
+                        
+                        // Restore button
+                        generateBtn.innerHTML = originalText;
+                        generateBtn.disabled = false;
+                        return;
+                        
+                    } else if (jobInfo.status === 'failed') {
+                        // Failed
+                        const result = jobInfo.result;
+                        let errorMessage = result?.error || 'Certificate generation failed';
+                        if (result?.stderr) {
+                            errorMessage += '\n\nCertbot output:\n' + result.stderr;
+                        }
+                        
+                        this.showAlert(errorMessage, 'danger');
+                        console.error('Certificate generation failed:', result);
+                        
+                        // Restore button
+                        generateBtn.innerHTML = originalText;
+                        generateBtn.disabled = false;
+                        return;
+                        
+                    } else if (Date.now() - startTime > maxPollTime) {
+                        // Timeout
+                        this.showAlert('Certificate generation is taking longer than expected. Please check the logs.', 'warning');
+                        
+                        // Restore button
+                        generateBtn.innerHTML = originalText;
+                        generateBtn.disabled = false;
+                        return;
+                    } else {
+                        // Still running, continue polling
+                        setTimeout(poll, pollInterval);
+                    }
+                } else {
+                    console.error('Error polling job status:', jobInfo);
+                    this.showAlert('Error checking certificate generation status', 'warning');
+                    setTimeout(poll, pollInterval);
+                }
+                
+            } catch (error) {
+                console.error('Error polling job status:', error);
+                // Continue polling on error
+                setTimeout(poll, pollInterval);
+            }
+        };
+        
+        // Start polling
+        setTimeout(poll, pollInterval);
+    }
+
+    // ========================================================================
+    // DNS Configuration Save/Load Management
+    // ========================================================================
+
+    async loadSavedDNSConfigs() {
+        try {
+            const response = await fetch('/api/letsencrypt/dns-configs');
+            const data = await response.json();
+            
+            const select = document.getElementById('saved-dns-configs');
+            select.innerHTML = '<option value="">Load a saved configuration...</option>';
+            
+            if (data.configs && data.configs.length > 0) {
+                data.configs.forEach(config => {
+                    const option = document.createElement('option');
+                    option.value = config.name;
+                    option.textContent = `${config.name} (${config.provider})`;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading saved DNS configs:', error);
+        }
+    }
+
+    async loadSavedConfig() {
+        const configName = document.getElementById('saved-dns-configs').value;
+        if (!configName) return;
+
+        try {
+            const response = await fetch(`/api/letsencrypt/dns-configs/${encodeURIComponent(configName)}`);
+            const config = await response.json();
+
+            if (response.ok) {
+                // Set provider
+                document.getElementById('dns-provider').value = config.provider;
+                
+                // Load provider requirements first
+                await this.loadProviderRequirements();
+                
+                // Wait a bit for fields to load
+                setTimeout(() => {
+                    // Fill in the DNS configuration fields
+                    const fieldsDiv = document.getElementById('provider-fields');
+                    const inputs = fieldsDiv.querySelectorAll('input');
+                    
+                    inputs.forEach(input => {
+                        const fieldName = input.name;
+                        if (config.config[fieldName]) {
+                            input.value = config.config[fieldName];
+                        }
+                    });
+                    
+                    this.showAlert(`Loaded configuration: ${config.name}`, 'success');
+                }, 100);
+            } else {
+                this.showAlert(`Failed to load configuration: ${config.error}`, 'danger');
+            }
+        } catch (error) {
+            console.error('Error loading saved config:', error);
+            this.showAlert('Error loading saved configuration', 'danger');
+        }
+    }
+
+    async saveDNSConfig() {
+        const provider = document.getElementById('dns-provider').value;
+        const configName = document.getElementById('config-save-name').value.trim();
+        const description = document.getElementById('config-save-description').value.trim();
+
+        if (!provider) {
+            this.showAlert('Please select a DNS provider first', 'warning');
+            return;
+        }
+
+        if (!configName) {
+            this.showAlert('Please enter a configuration name', 'warning');
+            return;
+        }
+
+        // Collect DNS configuration
+        const dnsConfig = this.collectDNSConfig();
+        if (Object.keys(dnsConfig).length === 0) {
+            this.showAlert('Please fill in the DNS configuration fields', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/letsencrypt/dns-configs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: configName,
+                    provider: provider,
+                    config: dnsConfig,
+                    description: description
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                this.showAlert(result.message, 'success');
+                
+                // Clear save fields
+                document.getElementById('config-save-name').value = '';
+                document.getElementById('config-save-description').value = '';
+                
+                // Refresh the saved configs dropdown
+                await this.loadSavedDNSConfigs();
+            } else {
+                this.showAlert(`Failed to save configuration: ${result.error}`, 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving DNS config:', error);
+            this.showAlert('Error saving DNS configuration', 'danger');
+        }
+    }
+
+    async refreshSavedConfigs() {
+        await this.loadSavedDNSConfigs();
+        this.showAlert('Saved configurations refreshed', 'info');
+    }
+
+    async showManageConfigsModal() {
+        const modal = new bootstrap.Modal(document.getElementById('manageConfigsModal'));
+        modal.show();
+        
+        // Show loading state
+        document.getElementById('manage-configs-loading').style.display = 'block';
+        document.getElementById('manage-configs-content').style.display = 'none';
+        
+        await this.loadConfigsForManagement();
+    }
+
+    async loadConfigsForManagement() {
+        try {
+            const response = await fetch('/api/letsencrypt/dns-configs');
+            const data = await response.json();
+            
+            // Hide loading
+            document.getElementById('manage-configs-loading').style.display = 'none';
+            document.getElementById('manage-configs-content').style.display = 'block';
+            
+            const configsList = document.getElementById('configs-list');
+            const noConfigs = document.getElementById('no-configs');
+            
+            if (data.configs && data.configs.length > 0) {
+                configsList.innerHTML = '';
+                noConfigs.style.display = 'none';
+                
+                data.configs.forEach(config => {
+                    const configCard = this.createConfigCard(config);
+                    configsList.appendChild(configCard);
+                });
+            } else {
+                configsList.innerHTML = '';
+                noConfigs.style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Error loading configs for management:', error);
+            document.getElementById('manage-configs-loading').style.display = 'none';
+            document.getElementById('manage-configs-content').style.display = 'block';
+            document.getElementById('configs-list').innerHTML = '<div class="alert alert-danger">Error loading configurations</div>';
+        }
+    }
+
+    createConfigCard(config) {
+        const card = document.createElement('div');
+        card.className = 'card mb-2';
+        
+        const createdDate = config.created_at ? new Date(config.created_at).toLocaleDateString() : 'Unknown';
+        const lastUsedDate = config.last_used ? new Date(config.last_used).toLocaleDateString() : 'Never';
+        
+        card.innerHTML = `
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="card-title mb-1">
+                            <i class="fas fa-server me-2 text-primary"></i>${config.name}
+                        </h6>
+                        <p class="card-text">
+                            <span class="badge bg-secondary">${config.provider}</span>
+                            ${config.description ? `<br><small class="text-muted">${config.description}</small>` : ''}
+                        </p>
+                        <small class="text-muted">
+                            Created: ${createdDate} | Last used: ${lastUsedDate}
+                        </small>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-primary" onclick="certificateManager.useConfigInGenerator('${config.name}')" title="Use in generator">
+                            <i class="fas fa-arrow-right"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" onclick="certificateManager.deleteConfig('${config.name}')" title="Delete configuration">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        return card;
+    }
+
+    async useConfigInGenerator(configName) {
+        // Close the management modal
+        bootstrap.Modal.getInstance(document.getElementById('manageConfigsModal')).hide();
+        
+        // Open the generator modal if not already open
+        const generateModal = document.getElementById('generateCertModal');
+        if (!generateModal.classList.contains('show')) {
+            await this.showGenerateCertificate();
+        }
+        
+        // Set the saved config dropdown
+        document.getElementById('saved-dns-configs').value = configName;
+        
+        // Load the configuration
+        await this.loadSavedConfig();
+    }
+
+    async deleteConfig(configName) {
+        if (!confirm(`Are you sure you want to delete the configuration "${configName}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/letsencrypt/dns-configs/${encodeURIComponent(configName)}`, {
+                method: 'DELETE'
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                this.showAlert(result.message, 'success');
+                
+                // Reload the management view
+                await this.loadConfigsForManagement();
+                
+                // Refresh the dropdown in the generator
+                await this.loadSavedDNSConfigs();
+            } else {
+                this.showAlert(`Failed to delete configuration: ${result.error}`, 'danger');
+            }
+        } catch (error) {
+            console.error('Error deleting config:', error);
+            this.showAlert('Error deleting configuration', 'danger');
+        }
+    }
 }
 
 // Global functions for onclick handlers
@@ -1268,6 +2017,40 @@ function clearTrackingData() {
 
 function clearFilter() {
     certificateManager.clearFilter();
+}
+
+// Let's Encrypt functions
+function showGenerateCertificate() {
+    certificateManager.showGenerateCertificate();
+}
+
+function loadProviderRequirements() {
+    certificateManager.loadProviderRequirements();
+}
+
+function validateDNSConfig() {
+    certificateManager.validateDNSConfig();
+}
+
+function generateCertificate() {
+    certificateManager.generateCertificate();
+}
+
+// DNS Configuration functions
+function loadSavedConfig() {
+    certificateManager.loadSavedConfig();
+}
+
+function saveDNSConfig() {
+    certificateManager.saveDNSConfig();
+}
+
+function refreshSavedConfigs() {
+    certificateManager.refreshSavedConfigs();
+}
+
+function showManageConfigsModal() {
+    certificateManager.showManageConfigsModal();
 }
 
 // Initialize the application

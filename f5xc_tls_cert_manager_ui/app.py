@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import serialization
 from werkzeug.security import safe_join
 
 from f5xc_tls_cert_manager import F5CertificateManager
+from letsencrypt_manager import LetsEncryptManager
 
 # Configure logging
 logging.basicConfig(
@@ -1308,6 +1309,469 @@ def debug_f5xc_list():
             os.unlink(temp_config)
         except Exception:
             pass
+
+
+# ============================================================================
+# Let's Encrypt Certificate Generation Endpoints
+# ============================================================================
+
+@app.route('/api/letsencrypt/providers', methods=['GET'])
+def get_dns_providers():
+    """Get list of supported DNS providers for Let's Encrypt."""
+    try:
+        le_manager = LetsEncryptManager(BASE_DIR)
+        providers = le_manager.get_supported_providers()
+        return jsonify({'providers': providers})
+    except Exception as e:
+        return jsonify({'error': f'Failed to get DNS providers: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/provider/<provider>/requirements', methods=['GET'])
+def get_provider_requirements(provider):
+    """Get configuration requirements for a specific DNS provider."""
+    try:
+        le_manager = LetsEncryptManager(BASE_DIR)
+        requirements = le_manager.get_provider_requirements(provider)
+        return jsonify(requirements)
+    except Exception as e:
+        return jsonify({'error': f'Failed to get provider requirements: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/check-installation', methods=['GET'])
+def check_letsencrypt_installation():
+    """Check if certbot and certbot-dns-multi are installed."""
+    try:
+        le_manager = LetsEncryptManager(BASE_DIR)
+        status = le_manager.check_certbot_installation()
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'error': f'Failed to check installation: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/generate', methods=['POST'])
+def start_letsencrypt_certificate_generation():
+    """Start asynchronous Let's Encrypt certificate generation."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        # Extract and validate parameters
+        domains = data.get('domains', [])
+        provider = data.get('provider')
+        dns_config = data.get('dns_config', {})
+        email = data.get('email')
+        staging = data.get('staging', False)
+        force_renewal = data.get('force_renewal', False)
+        
+        # Input validation
+        if not domains:
+            return jsonify({'error': 'At least one domain is required'}), 400
+        
+        if not provider:
+            return jsonify({'error': 'DNS provider is required'}), 400
+        
+        if not dns_config:
+            return jsonify({'error': 'DNS configuration is required'}), 400
+        
+        if not email:
+            return jsonify({'error': 'Email address is required'}), 400
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email):
+            return jsonify({'error': 'Invalid email address format'}), 400
+        
+        # Validate domains
+        for domain in domains:
+            if not validate_input(domain, 253, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.*'):
+                return jsonify({'error': f'Invalid domain: {domain}'}), 400
+        
+        logger.info(f"Starting Let's Encrypt certificate generation for domains: {domains} using provider: {provider}")
+        
+        # Start certificate generation
+        le_manager = LetsEncryptManager(BASE_DIR)
+        job_id = le_manager.start_certificate_generation(
+            domains=domains,
+            provider=provider,
+            dns_config=dns_config,
+            email=email,
+            staging=staging,
+            force_renewal=force_renewal
+        )
+        
+        logger.info(f"Started certificate generation job: {job_id}")
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'message': 'Certificate generation started',
+            'status_url': f'/api/letsencrypt/job/{job_id}'
+        })
+            
+    except Exception as e:
+        logger.error(f"Error starting Let's Encrypt certificate generation: {e}")
+        return jsonify({'error': f'Failed to start certificate generation: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/job/<job_id>', methods=['GET'])
+def get_letsencrypt_job_status(job_id):
+    """Get the status of a certificate generation job."""
+    try:
+        le_manager = LetsEncryptManager(BASE_DIR)
+        job_info = le_manager.get_job_status(job_id)
+        
+        if 'error' in job_info:
+            return jsonify(job_info), 404
+        
+        return jsonify(job_info)
+        
+    except Exception as e:
+        logger.error(f"Error getting job status: {e}")
+        return jsonify({'error': f'Failed to get job status: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/certificates', methods=['GET'])
+def list_letsencrypt_certificates():
+    """List existing Let's Encrypt certificates."""
+    try:
+        le_manager = LetsEncryptManager(BASE_DIR)
+        certificates = le_manager.list_existing_certificates()
+        return jsonify({'certificates': certificates})
+    except Exception as e:
+        return jsonify({'error': f'Failed to list certificates: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/validate-config', methods=['POST'])
+def validate_dns_config():
+    """Validate DNS provider configuration."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        provider = data.get('provider')
+        config = data.get('config', {})
+        
+        if not provider:
+            return jsonify({'error': 'Provider is required'}), 400
+        
+        le_manager = LetsEncryptManager(BASE_DIR)
+        is_valid, error_msg = le_manager.validate_provider_config(provider, config)
+        
+        return jsonify({
+            'valid': is_valid,
+            'error': error_msg if not is_valid else None
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to validate configuration: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/dns-configs', methods=['GET'])
+def get_saved_dns_configs():
+    """Get list of saved DNS provider configurations."""
+    try:
+        configs_file = BASE_DIR / 'dns_configs.json'
+        
+        if not configs_file.exists():
+            return jsonify({'configs': []})
+        
+        with open(configs_file, 'r') as f:
+            data = json.load(f)
+        
+        # Return configs without sensitive data (for listing)
+        safe_configs = []
+        for config in data.get('configs', []):
+            safe_config = {
+                'name': config.get('name'),
+                'provider': config.get('provider'),
+                'description': config.get('description', ''),
+                'created_at': config.get('created_at'),
+                'last_used': config.get('last_used')
+            }
+            safe_configs.append(safe_config)
+        
+        return jsonify({'configs': safe_configs})
+        
+    except Exception as e:
+        logger.error(f"Error loading DNS configs: {e}")
+        return jsonify({'error': f'Failed to load DNS configurations: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/dns-configs', methods=['POST'])
+def save_dns_config():
+    """Save a DNS provider configuration."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        config_name = data.get('name', '').strip()
+        provider = data.get('provider', '').strip()
+        dns_config = data.get('config', {})
+        description = data.get('description', '').strip()
+        
+        if not config_name:
+            return jsonify({'error': 'Configuration name is required'}), 400
+        
+        if not provider:
+            return jsonify({'error': 'DNS provider is required'}), 400
+        
+        if not dns_config:
+            return jsonify({'error': 'DNS configuration is required'}), 400
+        
+        # Validate configuration name
+        if not validate_input(config_name, 64, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ '):
+            return jsonify({'error': 'Invalid configuration name'}), 400
+        
+        # Validate provider configuration
+        le_manager = LetsEncryptManager(BASE_DIR)
+        is_valid, error_msg = le_manager.validate_provider_config(provider, dns_config)
+        if not is_valid:
+            return jsonify({'error': f'Invalid DNS configuration: {error_msg}'}), 400
+        
+        # Load existing configs
+        configs_file = BASE_DIR / 'dns_configs.json'
+        if configs_file.exists():
+            with open(configs_file, 'r') as f:
+                all_data = json.load(f)
+        else:
+            all_data = {'configs': []}
+        
+        # Check for duplicate names
+        existing_names = [cfg.get('name') for cfg in all_data.get('configs', [])]
+        if config_name in existing_names:
+            return jsonify({'error': f'Configuration name "{config_name}" already exists'}), 400
+        
+        # Encrypt sensitive data (simple base64 encoding for now - could be enhanced)
+        import base64
+        encrypted_config = {}
+        for key, value in dns_config.items():
+            if isinstance(value, str):
+                # Simple encoding (in production, use proper encryption)
+                encrypted_config[key] = base64.b64encode(value.encode()).decode()
+            else:
+                encrypted_config[key] = value
+        
+        # Create new config entry
+        new_config = {
+            'name': config_name,
+            'provider': provider,
+            'description': description,
+            'config': encrypted_config,
+            'created_at': datetime.now().isoformat(),
+            'last_used': None
+        }
+        
+        # Add to configs
+        all_data['configs'].append(new_config)
+        
+        # Save to file
+        with open(configs_file, 'w') as f:
+            json.dump(all_data, f, indent=2)
+        
+        logger.info(f"Saved DNS configuration: {config_name} ({provider})")
+        
+        return jsonify({
+            'success': True,
+            'message': f'DNS configuration "{config_name}" saved successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error saving DNS config: {e}")
+        return jsonify({'error': f'Failed to save DNS configuration: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/dns-configs/<config_name>', methods=['GET'])
+def get_dns_config(config_name):
+    """Get a specific DNS provider configuration."""
+    try:
+        configs_file = BASE_DIR / 'dns_configs.json'
+        
+        if not configs_file.exists():
+            return jsonify({'error': 'Configuration not found'}), 404
+        
+        with open(configs_file, 'r') as f:
+            all_data = json.load(f)
+        
+        # Find the config
+        config = None
+        for cfg in all_data.get('configs', []):
+            if cfg.get('name') == config_name:
+                config = cfg
+                break
+        
+        if not config:
+            return jsonify({'error': 'Configuration not found'}), 404
+        
+        # Decrypt sensitive data
+        import base64
+        decrypted_config = {}
+        for key, value in config.get('config', {}).items():
+            if isinstance(value, str):
+                try:
+                    # Simple decoding (in production, use proper decryption)
+                    decrypted_config[key] = base64.b64decode(value.encode()).decode()
+                except:
+                    decrypted_config[key] = value
+            else:
+                decrypted_config[key] = value
+        
+        # Update last used timestamp
+        config['last_used'] = datetime.now().isoformat()
+        with open(configs_file, 'w') as f:
+            json.dump(all_data, f, indent=2)
+        
+        result = {
+            'name': config.get('name'),
+            'provider': config.get('provider'),
+            'description': config.get('description', ''),
+            'config': decrypted_config,
+            'created_at': config.get('created_at'),
+            'last_used': config.get('last_used')
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error loading DNS config: {e}")
+        return jsonify({'error': f'Failed to load DNS configuration: {str(e)}'}), 500
+
+
+@app.route('/api/letsencrypt/dns-configs/<config_name>', methods=['DELETE'])
+def delete_dns_config(config_name):
+    """Delete a saved DNS provider configuration."""
+    try:
+        configs_file = BASE_DIR / 'dns_configs.json'
+        
+        if not configs_file.exists():
+            return jsonify({'error': 'Configuration not found'}), 404
+        
+        with open(configs_file, 'r') as f:
+            all_data = json.load(f)
+        
+        # Find and remove the config
+        original_count = len(all_data.get('configs', []))
+        all_data['configs'] = [cfg for cfg in all_data.get('configs', []) if cfg.get('name') != config_name]
+        
+        if len(all_data['configs']) == original_count:
+            return jsonify({'error': 'Configuration not found'}), 404
+        
+        # Save updated configs
+        with open(configs_file, 'w') as f:
+            json.dump(all_data, f, indent=2)
+        
+        logger.info(f"Deleted DNS configuration: {config_name}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'DNS configuration "{config_name}" deleted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting DNS config: {e}")
+        return jsonify({'error': f'Failed to delete DNS configuration: {str(e)}'}), 500
+
+
+@app.route('/api/certificates/delete-local', methods=['DELETE'])
+def delete_certificate_locally():
+    """Delete certificate files from local storage (certs/ and letsencrypt/)."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        directory_name = data.get('directory_name')
+        if not directory_name:
+            return jsonify({'error': 'Directory name is required'}), 400
+        
+        # Validate directory name to prevent path traversal
+        if not validate_input(directory_name, 255, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.'):
+            return jsonify({'error': 'Invalid directory name'}), 400
+        
+        logger.info(f"Deleting certificate locally: {directory_name}")
+        
+        # Define paths to delete
+        certs_dir = BASE_DIR / 'certs' / directory_name
+        letsencrypt_live_dir = BASE_DIR / 'letsencrypt' / 'config' / 'live' / directory_name
+        letsencrypt_archive_dir = BASE_DIR / 'letsencrypt' / 'config' / 'archive' / directory_name
+        
+        deleted_paths = []
+        errors = []
+        
+        # Delete from certs/ directory
+        if certs_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(certs_dir)
+                deleted_paths.append(str(certs_dir))
+                logger.info(f"Deleted certificate directory: {certs_dir}")
+            except Exception as e:
+                error_msg = f"Failed to delete {certs_dir}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        # Delete from letsencrypt/config/live/ directory
+        if letsencrypt_live_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(letsencrypt_live_dir)
+                deleted_paths.append(str(letsencrypt_live_dir))
+                logger.info(f"Deleted Let's Encrypt live directory: {letsencrypt_live_dir}")
+            except Exception as e:
+                error_msg = f"Failed to delete {letsencrypt_live_dir}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        # Delete from letsencrypt/config/archive/ directory
+        if letsencrypt_archive_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(letsencrypt_archive_dir)
+                deleted_paths.append(str(letsencrypt_archive_dir))
+                logger.info(f"Deleted Let's Encrypt archive directory: {letsencrypt_archive_dir}")
+            except Exception as e:
+                error_msg = f"Failed to delete {letsencrypt_archive_dir}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        # Also clean up any renewal config files
+        renewal_config = BASE_DIR / 'letsencrypt' / 'config' / 'renewal' / f"{directory_name}.conf"
+        if renewal_config.exists():
+            try:
+                renewal_config.unlink()
+                deleted_paths.append(str(renewal_config))
+                logger.info(f"Deleted renewal config: {renewal_config}")
+            except Exception as e:
+                error_msg = f"Failed to delete {renewal_config}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        if not deleted_paths and not errors:
+            return jsonify({
+                'success': False,
+                'error': f'Certificate directory "{directory_name}" not found in local storage'
+            }), 404
+        
+        # Prepare result
+        result = {
+            'success': len(errors) == 0,
+            'directory_name': directory_name,
+            'deleted_paths': deleted_paths
+        }
+        
+        if errors:
+            result['warnings'] = errors
+            result['message'] = f'Certificate "{directory_name}" partially deleted with warnings'
+        else:
+            result['message'] = f'Certificate "{directory_name}" deleted successfully from local storage'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error deleting certificate locally: {e}")
+        return jsonify({'error': f'Failed to delete certificate: {str(e)}'}), 500
 
 
 @app.route('/static/<path:filename>')

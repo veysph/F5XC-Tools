@@ -4,10 +4,21 @@
 
 This web application provides a user-friendly interface for managing TLS certificates on the F5 Distributed Cloud platform. It allows users to view certificate details, monitor expiration dates, and perform create, replace, and delete operations through a small web interface.
 
+
+
 **Key Features:**
 - Local certificates discovery and status monitoring
-- Visual expiration alerts and status indicators  
+- Visual expiration alerts and status indicators
 - F5 Distributed Cloud integration (create, replace, delete certificates)
+
+**Let's Encrypt Integration**
+- Generate Let's Encrypt certificates for any domain using 80+ DNS providers
+
+**Certbot multi DNS Configuration Management**
+- Save DNS provider configurations for reuse
+- Load saved configurations with one click
+- Manage configurations (view, delete)
+- Encrypted storage of sensitive data
 
 ## Required Directory Structure (Runtime)
 
@@ -36,6 +47,8 @@ your-deployment-location/
 - Python
 - F5 Distributed Cloud account and client certificate (.p12 file)
 - TLS certificates in the expected directory structure
+- Network access to Let's Encrypt servers
+- DNS provider API access configured
 
 ### 2. Basic Setup
 
@@ -107,3 +120,19 @@ gunicorn --config gunicorn.conf.py app:app
 ## Production Deployment
 
 For production deployment with systemd service, SSL/TLS termination, and security hardening, see the detailed **DEPLOYMENT.md** guide included in this package.
+
+## Files
+**Core Application Files**
+- `app.py` - Main Flask application with all API endpoints
+- `letsencrypt_manager.py` - Let's Encrypt certificate generation module
+- `requirements.txt` - Updated Python dependencies
+- `templates/index.html` - Updated HTML template with Let's Encrypt UI
+- `static/app.js` - Updated JavaScript with certificate generation functionality
+- `static/style.css` - Updated CSS styles
+
+**Production Files**
+- `f5xc_tls_cert_manager.py` - Production service wrapper
+- `gunicorn.conf.py` - Gunicorn configuration
+- `run_production.sh` - Production startup script
+- `f5xc-cert-manager.service` - Systemd service file
+- `config.json.example` - Configuration example

@@ -9,3 +9,7 @@ gunicorn>=21.2.0
 
 # Security
 cffi>=1.16.0
+
+# Let's Encrypt certificate generation
+certbot>=2.0.0
+certbot-dns-multi>=1.0.0

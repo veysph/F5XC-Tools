@@ -16,6 +16,9 @@
                 F5 Distributed Cloud TLS Certificate Manager
             </span>
             <div>
+                <button class="btn btn-outline-light me-2" onclick="showGenerateCertificate()">
+                    <i class="fas fa-plus"></i> Generate Certificate
+                </button>
                 <button class="btn btn-outline-light me-2" onclick="showSettings()">
                     <i class="fas fa-cog"></i> Settings
                 </button>
@@ -133,6 +136,160 @@
         </div>
     </div>
 
+    <!-- Generate Certificate Modal -->
+    <div class="modal fade" id="generateCertModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-plus me-2"></i>Generate Let's Encrypt Certificate
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="generate-cert-form-container">
+                        <!-- Installation Check -->
+                        <div id="installation-check" class="mb-4">
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="spinner-border spinner-border-sm me-2" role="status" id="install-check-spinner">
+                                    <span class="visually-hidden">Checking...</span>
+                                </div>
+                                <span>Checking certbot installation...</span>
+                            </div>
+                            <div id="installation-status" class="alert" style="display: none;"></div>
+                        </div>
+
+                        <!-- Generation Form -->
+                        <form id="generate-cert-form" style="display: none;">
+                            <!-- Step 1: Basic Information -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="fas fa-globe me-2"></i>Step 1: Domain Information</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="cert-email" class="form-label">Email Address *</label>
+                                        <input type="email" class="form-control" id="cert-email" required 
+                                               placeholder="your-email@example.com">
+                                        <div class="form-text">Email for Let's Encrypt registration and notifications</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="cert-domains" class="form-label">Domains *</label>
+                                        <textarea class="form-control" id="cert-domains" rows="3" required
+                                                  placeholder="example.com&#10;www.example.com&#10;*.example.com"></textarea>
+                                        <div class="form-text">Enter one domain per line. Wildcards (*.example.com) are supported.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 2: DNS Provider -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="fas fa-server me-2"></i>Step 2: DNS Provider</h6>
+                                </div>
+                                <div class="card-body">
+                                    <!-- Saved Configurations -->
+                                    <div class="mb-3">
+                                        <label for="saved-dns-configs" class="form-label">Saved Configurations</label>
+                                        <div class="d-flex gap-2">
+                                            <select class="form-select" id="saved-dns-configs" onchange="loadSavedConfig()">
+                                                <option value="">Load a saved configuration...</option>
+                                            </select>
+                                            <button type="button" class="btn btn-outline-secondary" onclick="refreshSavedConfigs()" title="Refresh saved configurations">
+                                                <i class="fas fa-sync"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-outline-info" onclick="showManageConfigsModal()" title="Manage saved configurations">
+                                                <i class="fas fa-cog"></i> Manage
+                                            </button>
+                                        </div>
+                                        <div class="form-text">Select a previously saved DNS configuration to auto-fill the fields below</div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="dns-provider" class="form-label">DNS Provider *</label>
+                                        <select class="form-select" id="dns-provider" required onchange="loadProviderRequirements()">
+                                            <option value="">Select a DNS provider...</option>
+                                        </select>
+                                        <div class="form-text">Choose your DNS provider for domain validation</div>
+                                    </div>
+                                    
+                                    <div id="provider-requirements" style="display: none;">
+                                        <div class="alert alert-info">
+                                            <div id="provider-description"></div>
+                                            <div class="mt-2">
+                                                <strong>Documentation:</strong> <a id="provider-docs-link" href="#" target="_blank">Provider Setup Guide</a>
+                                            </div>
+                                        </div>
+                                        
+                                        <div id="provider-fields"></div>
+
+                                        <!-- Save Configuration -->
+                                        <div class="mt-3 p-3 bg-light rounded">
+                                            <h6 class="mb-2"><i class="fas fa-save me-2"></i>Save This Configuration</h6>
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <input type="text" class="form-control form-control-sm" id="config-save-name" placeholder="Configuration name">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <input type="text" class="form-control form-control-sm" id="config-save-description" placeholder="Description (optional)">
+                                                </div>
+                                            </div>
+                                            <div class="mt-2">
+                                                <button type="button" class="btn btn-success btn-sm" onclick="saveDNSConfig()">
+                                                    <i class="fas fa-save"></i> Save Configuration
+                                                </button>
+                                                <div class="form-text">Save these settings to reuse for future certificate generations</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 3: Advanced Options -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="fas fa-sliders-h me-2"></i>Step 3: Advanced Options</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cert-staging">
+                                                <label class="form-check-label" for="cert-staging">
+                                                    Use staging environment
+                                                </label>
+                                                <div class="form-text">Generate test certificates (recommended for testing)</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cert-force-renewal">
+                                                <label class="form-check-label" for="cert-force-renewal">
+                                                    Force renewal
+                                                </label>
+                                                <div class="form-text">Force certificate renewal even if not needed</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" id="validate-config-btn" onclick="validateDNSConfig()" style="display: none;">
+                        <i class="fas fa-check"></i> Validate Configuration
+                    </button>
+                    <button type="button" class="btn btn-primary" id="generate-cert-btn" onclick="generateCertificate()" style="display: none;">
+                        <i class="fas fa-magic"></i> Generate Certificate
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div class="modal fade" id="settingsModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -221,6 +378,46 @@
                     <button type="button" class="btn btn-primary" onclick="saveSettings()">
                         <i class="fas fa-save"></i> Save Settings
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage DNS Configurations Modal -->
+    <div class="modal fade" id="manageConfigsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-cog me-2"></i>Manage DNS Configurations
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="manage-configs-loading" class="text-center">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        Loading configurations...
+                    </div>
+                    
+                    <div id="manage-configs-content" style="display: none;">
+                        <div class="mb-3">
+                            <h6><i class="fas fa-list me-2"></i>Saved DNS Configurations</h6>
+                            <div class="form-text mb-3">Manage your saved DNS provider configurations</div>
+                        </div>
+                        
+                        <div id="configs-list">
+                            <!-- Configurations will be loaded here -->
+                        </div>
+                        
+                        <div id="no-configs" class="text-center text-muted" style="display: none;">
+                            <i class="fas fa-inbox fa-2x mb-2"></i>
+                            <p>No saved configurations found</p>
+                            <small>Save a configuration during certificate generation to see it here</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
