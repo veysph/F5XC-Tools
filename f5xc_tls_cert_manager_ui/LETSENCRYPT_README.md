@@ -17,6 +17,13 @@ This application now supports generating Let's Encrypt certificates using the `c
 
 GO must be installed to comply with `certbot-dns-multi` installation.
 
+Prepare Python venv:
+```bash
+# Create Python virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
 Install required Python packages:
 ```bash
 pip install -r requirements.txt
