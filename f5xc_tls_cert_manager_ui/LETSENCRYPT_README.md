@@ -81,21 +81,6 @@ Popular providers include:
 
 And 70+ more providers. See the full list at: https://go-acme.github.io/lego/dns/
 
-### API Endpoints
-
-The following REST API endpoints are available:
-
-- `GET /api/letsencrypt/providers` - List supported DNS providers
-- `GET /api/letsencrypt/check-installation` - Check certbot installation
-- `GET /api/letsencrypt/provider/<provider>/requirements` - Get provider configuration requirements
-- `POST /api/letsencrypt/generate` - Start asynchronous certificate generation (returns job ID)
-- `GET /api/letsencrypt/job/<job_id>` - Check certificate generation job status
-- `POST /api/letsencrypt/validate-config` - Validate DNS provider configuration
-- `GET /api/letsencrypt/dns-configs` - List saved DNS provider configurations
-- `POST /api/letsencrypt/dns-configs` - Save a new DNS provider configuration
-- `GET /api/letsencrypt/dns-configs/<name>` - Get a specific saved configuration
-- `DELETE /api/letsencrypt/dns-configs/<name>` - Delete a saved configuration
-
 ## Configuration Examples
 
 ### Cloudflare
