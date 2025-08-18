@@ -148,20 +148,6 @@ The following REST API endpoints are available:
 5. Job runs certbot in background (can take several minutes)
 6. Final result is available via job status API
 
-### Certificate Naming Convention
-
-To ensure F5XC compatibility, certificate names automatically use the main domain:
-
-| Input Domain(s) | Certificate Name | Directory |
-|---|---|---|
-| `*.stetsonneufeldduo.com` | `stetsonneufeldduo.com` | `certs/stetsonneufeldduo.com/` |
-| `www.stetsonneufeldduo.com` | `stetsonneufeldduo.com` | `certs/stetsonneufeldduo.com/` |
-| `api.stetsonneufeldduo.com` | `stetsonneufeldduo.com` | `certs/stetsonneufeldduo.com/` |
-| `stetsonneufeldduo.com` | `stetsonneufeldduo.com` | `certs/stetsonneufeldduo.com/` |
-| `www.example.com`, `api.example.com` | `example.com` | `certs/example.com/` |
-
-This ensures consistent naming that complies with F5XC requirements and prevents conflicts.
-
 ## DNS Configuration Management
 
 ### Save and Reuse DNS Settings
@@ -290,13 +276,3 @@ f5xc/
         ├── cert.pem
         └── chain.pem
 ```
-
-## Testing
-
-Run the included test script to verify the integration:
-
-```bash
-python3 test_letsencrypt.py
-```
-
-This will test the LetsEncryptManager class and provide information about API endpoints.
