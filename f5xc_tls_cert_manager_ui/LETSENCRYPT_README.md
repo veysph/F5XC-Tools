@@ -123,31 +123,6 @@ The following REST API endpoints are available:
 **Required fields:**
 - `DO_AUTH_TOKEN`: DigitalOcean API token
 
-## Security Considerations
-
-1. **Credential Storage**: DNS provider credentials are only stored temporarily during certificate generation and are automatically cleaned up
-2. **File Permissions**: Credential files are created with secure permissions (600)
-3. **Staging Environment**: Use staging environment for testing to avoid rate limits
-4. **Input Validation**: All inputs are validated for security
-5. **Asynchronous Processing**: Certificate generation runs in background threads to prevent web server timeouts
-6. **F5XC Naming Convention**: Certificate names use main domain only (e.g., `*.example.com` and `www.example.com` both create `example.com`)
-
-## Performance & Reliability
-
-### Asynchronous Processing
-- **Non-blocking**: Certificate generation runs in background threads
-- **Progress Tracking**: Real-time progress updates via job status API
-- **Timeout Handling**: No web server timeouts during long-running operations
-- **Job Persistence**: Job status is saved to disk for reliability
-
-### Process Flow
-1. User submits certificate generation request
-2. System validates input and starts background job
-3. Returns job ID immediately (fast response)
-4. Frontend polls job status for progress updates
-5. Job runs certbot in background (can take several minutes)
-6. Final result is available via job status API
-
 ## DNS Configuration Management
 
 ### Save and Reuse DNS Settings
@@ -172,64 +147,6 @@ The application allows you to save DNS provider configurations for easy reuse:
 - View creation dates and last used timestamps
 - Delete unwanted configurations
 - Use configurations directly from the management interface
-
-#### Security Features
-- Sensitive data (API keys, tokens) are base64 encoded for storage
-- Configurations stored in local `dns_configs.json` file
-- No sensitive data exposed in API listing endpoints
-- Automatic cleanup on configuration deletion
-
-#### Benefits
-- **Time Saving**: No more re-entering credentials
-- **Error Reduction**: Consistent, tested configurations
-- **Multiple Providers**: Save configs for different DNS providers
-- **Team Sharing**: Share configuration file between team members
-- **Quick Switching**: Switch between production/staging configurations
-
-## Troubleshooting
-
-### Installation Issues
-
-1. **Certbot not found**:
-   ```bash
-   # Install certbot
-   pip install certbot
-   # Or via system package manager
-   sudo apt-get install certbot  # Ubuntu/Debian
-   sudo yum install certbot      # CentOS/RHEL
-   ```
-
-2. **certbot-dns-multi not available**:
-   ```bash
-   # Install the plugin
-   pip install certbot-dns-multi
-   # Verify installation
-   certbot plugins
-   ```
-
-### Certificate Generation Issues
-
-1. **DNS Validation Failures**:
-   - Verify DNS provider credentials are correct
-   - Ensure API tokens have necessary permissions
-   - Check domain ownership and DNS propagation
-
-2. **Rate Limits**:
-   - Use staging environment for testing
-   - Let's Encrypt has rate limits: 50 certificates per registered domain per week
-
-3. **Wildcard Certificates**:
-   - Require DNS-01 challenge (automatically used)
-   - Ensure your DNS provider supports API access
-
-## Integration with F5XC
-
-Generated Let's Encrypt certificates can be immediately deployed to F5 Distributed Cloud:
-
-1. Generate certificate using the Let's Encrypt feature
-2. Certificate appears in the main certificate list  
-3. Use existing F5XC deployment features (Create/Replace) to deploy to F5XC
-4. Configure F5XC settings in the Settings panel
 
 ### Smart Delete Functionality
 
