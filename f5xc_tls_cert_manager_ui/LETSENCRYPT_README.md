@@ -15,6 +15,8 @@ This application now supports generating Let's Encrypt certificates using the `c
 
 ### Prerequisites
 
+GO must be installed to comply with `certbot-dns-multi` installation.
+
 Install required Python packages:
 ```bash
 pip install -r requirements.txt
