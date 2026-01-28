@@ -1,0 +1,10 @@
+# API Configuration
+api:
+  base_url: "https://<yourtenant>.ves.volterra.io"
+  cert_path: "/Users/p.veys/<yourtenant>.ves.volterra.io.api-creds.p12"
+  cert_password: "password"
+
+# Origin Pool Configuration
+origin_pool:
+  namespace: "<yournamespace>"  # Update with your namespace
+  output_dir: "./pool_configs"
